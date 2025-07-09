@@ -1,2 +1,2 @@
-# lighthouse-role
-lighthouse-role
+# clickhouse-role
+clickhouse-role

@@ -1,5 +1,2 @@
 ---
-- name: Перезапуск Nginx
-  ansible.builtin.service:
-    name: nginx
-    state: restarted
+# handlers file for clickhouse-role

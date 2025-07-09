@@ -1,6 +1,6 @@
 ---
 - name: Установка и настройка Nginx с Lighthouse
-  hosts: lighthouse
+  hosts: clickhouse
   become: true
   roles:
     - clickhouse-role

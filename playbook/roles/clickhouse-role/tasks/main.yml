@@ -1,77 +1,72 @@
 ---
-- name: Установка необходимых пакетов
+- name: Установка зависимостей
   ansible.builtin.apt:
-    name: "{{ item }}"
-    state: present
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - gnupg
     update_cache: true
-  loop:
-    - nginx
-    - unzip
-    - curl
 
-# Остановка Nginx перед изменениями
-- name: Остановка сервиса Nginx
-  ansible.builtin.service:
-    name: nginx
-    state: stopped
-
-# Загрузка Lighthouse
-- name: Загрузка Lighthouse
-  ansible.builtin.get_url:
-    url: "https://github.com/VKCOM/lighthouse/archive/refs/heads/master.zip"
-    dest: "/tmp/lighthouse.zip"
-    mode: "0755"
-
-# Подготовка целевой директории
-- name: Создание целевой директории
+- name: Ensure GPG directory exists
   ansible.builtin.file:
-    path: "/var/www/lighthouse"
+    path: /usr/share/keyrings
     state: directory
     mode: "0755"
-    owner: root
-    group: root
 
-# Распаковка Lighthouse
-- name: Распаковка Lighthouse
-  ansible.builtin.unarchive:
-    src: "/tmp/lighthouse.zip"
-    dest: "/var/www/lighthouse"
-    remote_src: true
-    extra_opts: ["-o"]
+- name: Добавление GPG-ключа
+  ansible.builtin.apt_key:
+    url: "https://packages.clickhouse.com/rpm/lts/repodata/repomd.xml.key"
+    keyring: /usr/share/keyrings/clickhouse-keyring.gpg
 
-# Установка прав
-- name: Установка прав доступа
+- name: Verify GPG key permissions
   ansible.builtin.file:
-    path: "/var/www/lighthouse"
-    state: directory
-    recurse: true
-    owner: root
-    group: root
-    mode: "0755"
-
-# Конфигурация Nginx
-- name: Настройка конфигурации Nginx
-  ansible.builtin.template:
-    src: lighthouse.conf.j2
-    dest: "/etc/nginx/sites-available/lighthouse"
+    path: /usr/share/keyrings/clickhouse-keyring.gpg
     mode: "0644"
-    owner: root
-    group: root
 
-- name: Активация сайта Lighthouse
+- name: Ensure directory exists
   ansible.builtin.file:
-    src: "/etc/nginx/sites-available/lighthouse"
-    dest: "/etc/nginx/sites-enabled/lighthouse"
-    state: link
+    path: /etc/apt/sources.list.d
+    state: directory
+    mode: "0755"
 
-- name: Отключение сайта по умолчанию
-  ansible.builtin.file:
-    path: "/etc/nginx/sites-enabled/default"
-    state: absent
+- name: Add ClickHouse repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/clickhouse.list
+    content: |
+      deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg] https://packages.clickhouse.com/deb stable main
+    mode: "0644"
 
-# Запуск Nginx
-- name: Запуск сервиса Nginx
+- name: Update apt package cache
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install ClickHouse packages
+  ansible.builtin.apt:
+    name:
+      - "clickhouse-server={{ clickhouse_version }}"
+      - "clickhouse-client={{ clickhouse_version }}"
+      - "clickhouse-common-static={{ clickhouse_version }}"
+    state: present
+    allow_downgrade: true
+
+- name: Ensure ClickHouse service is running and enabled
   ansible.builtin.service:
-    name: nginx
+    name: clickhouse-server
     state: started
     enabled: true
+
+- name: Get ClickHouse version
+  ansible.builtin.command: clickhouse-client --query "SELECT version()"
+  register: ch_version
+  changed_when: false
+
+- name: Show installed version
+  ansible.builtin.debug:
+    msg: "Установлена версия ClickHouse: {{ ch_version.stdout }}"
+
+- name: Create database
+  ansible.builtin.command: "clickhouse-client -q 'create database logs;'"
+  register: create_db
+  failed_when: create_db.rc != 0 and create_db.rc != 82
+  changed_when: create_db.rc == 0

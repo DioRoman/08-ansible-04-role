@@ -1,77 +1,119 @@
 ---
-- name: Установка необходимых пакетов
+- name: Install dependencies
   ansible.builtin.apt:
-    name: "{{ item }}"
+    name: ["wget", "tar", "gzip"]
     state: present
-    update_cache: true
-  loop:
-    - nginx
-    - unzip
-    - curl
+  when: ansible_os_family == 'Debian'
 
-# Остановка Nginx перед изменениями
-- name: Остановка сервиса Nginx
-  ansible.builtin.service:
-    name: nginx
-    state: stopped
+- name: Create installation directory
+  ansible.builtin.file:
+    path: "{{ vector_install_dir }}"
+    state: directory
+    mode: '0755'
 
-# Загрузка Lighthouse
-- name: Загрузка Lighthouse
+- name: Download Vector
   ansible.builtin.get_url:
-    url: "https://github.com/VKCOM/lighthouse/archive/refs/heads/master.zip"
-    dest: "/tmp/lighthouse.zip"
-    mode: "0755"
+    url: "https://packages.timber.io/vector/{{ vector_version }}/vector-{{ vector_version }}-x86_64-unknown-linux-gnu.tar.gz"
+    dest: "/tmp/vector.tar.gz"
+    mode: '0644'
+    timeout: 30
 
-# Подготовка целевой директории
-- name: Создание целевой директории
-  ansible.builtin.file:
-    path: "/var/www/lighthouse"
-    state: directory
-    mode: "0755"
-    owner: root
-    group: root
-
-# Распаковка Lighthouse
-- name: Распаковка Lighthouse
+- name: Extract Vector
   ansible.builtin.unarchive:
-    src: "/tmp/lighthouse.zip"
-    dest: "/var/www/lighthouse"
+    src: "/tmp/vector.tar.gz"
+    dest: "{{ vector_install_dir }}"
     remote_src: true
-    extra_opts: ["-o"]
+    extra_opts: ["--strip-components=1"]
+    creates: "{{ vector_install_dir }}/bin/vector"
 
-# Установка прав
-- name: Установка прав доступа
+- name: Install Vector binary
+  ansible.builtin.copy:
+    src: "{{ vector_install_dir }}/vector-x86_64-unknown-linux-gnu/bin/vector"
+    dest: "/usr/local/bin/vector"
+    mode: '0755'
+    remote_src: true
+    owner: root
+    group: root
+
+- name: Verify Vector binary
+  ansible.builtin.command: "ls -la /usr/local/bin/vector"
+  register: vector_binary_check
+  changed_when: false
+
+- name: Create vector group
+  ansible.builtin.group:
+    name: vector
+    system: true
+    state: present
+
+- name: Create vector user
+  ansible.builtin.user:
+    name: vector
+    group: vector
+    system: true
+    shell: /bin/false
+    home: /var/lib/vector
+  register: user_created
+
+- name: Add vector to adm group (for log access)
+  ansible.builtin.user:
+    name: vector
+    groups: adm
+    append: true
+  when: user_created.changed or user_created is success
+
+- name: Create directories
   ansible.builtin.file:
-    path: "/var/www/lighthouse"
+    path: "{{ item.path }}"
     state: directory
-    recurse: true
-    owner: root
-    group: root
-    mode: "0755"
+    owner: vector
+    group: vector
+    mode: '0755'
+  loop:
+    - { path: "/etc/vector" }
+    - { path: "/var/lib/vector" }
+    - { path: "/var/log/vector" }
 
-# Конфигурация Nginx
-- name: Настройка конфигурации Nginx
+- name: Deploy config
   ansible.builtin.template:
-    src: lighthouse.conf.j2
-    dest: "/etc/nginx/sites-available/lighthouse"
-    mode: "0644"
-    owner: root
-    group: root
+    src: vector.toml
+    dest: "{{ vector_config_path }}"
+    mode: '0640'
+    owner: vector
+    group: vector
 
-- name: Активация сайта Lighthouse
-  ansible.builtin.file:
-    src: "/etc/nginx/sites-available/lighthouse"
-    dest: "/etc/nginx/sites-enabled/lighthouse"
-    state: link
+- name: Deploy systemd service
+  ansible.builtin.template:
+    src: vector.service.j2
+    dest: "/etc/systemd/system/vector.service"
+    mode: '0644'
 
-- name: Отключение сайта по умолчанию
-  ansible.builtin.file:
-    path: "/etc/nginx/sites-enabled/default"
-    state: absent
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
 
-# Запуск Nginx
-- name: Запуск сервиса Nginx
-  ansible.builtin.service:
-    name: nginx
+- name: Enable and start Vector
+  ansible.builtin.systemd:
+    name: vector
     state: started
     enabled: true
+
+- name: Verify Vector installation
+  block:
+    - name: Check Vector version
+      ansible.builtin.command: "/usr/local/bin/vector --version"
+      register: vector_version_check
+      changed_when: false
+
+    - name: Display Vector version
+      ansible.builtin.debug:
+        msg: "Successfully installed Vector version: {{ vector_version_check.stdout }}"
+  rescue:
+    - name: Show installation error
+      ansible.builtin.debug:
+
+- name: Check Vector service status
+  ansible.builtin.command: systemctl status vector
+  register: vector_status
+  changed_when: false
+  ignore_errors: true

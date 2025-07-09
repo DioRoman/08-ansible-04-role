@@ -1,13 +1,15 @@
 Role Name
 =========
 
-lighthouse installation on Debian system
+Clickhouse installation on Debian system
 
 Requirements
 ------------
 
 Role Variables
 --------------
+
+clickhouse_version
 
 Dependencies
 ------------
@@ -21,7 +23,7 @@ Including an example of how to use your role (for instance, with variables passe
 
     - hosts: servers
       roles:
-         - { role: lighthouse-role}
+         - { role: clickhouse-role}
 
 License
 -------
