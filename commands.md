@@ -20,4 +20,6 @@ ansible-galaxy install -r requirements.yml
 
 ansible-galaxy install -r requirements.yml -p roles
 
+ansible-galaxy install -r requirements.yml -p roles --force-with-deps
+
 cd /mnt/c/Users/rlyst/Netology/08-ansible-04-role/playbook
